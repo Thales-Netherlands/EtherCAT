@@ -42,3 +42,5 @@ script/ethercatctl
 script/init.d/ethercat
 stamp-h1
 tool/ethercat
+
+doxygen-output/
