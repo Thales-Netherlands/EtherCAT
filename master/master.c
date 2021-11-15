@@ -1742,39 +1742,39 @@ static int ec_master_eoe_thread(void *priv_data)
         none_open = 1;
         all_idle = 1;
 
-        list_for_each_entry(eoe, &master->eoe_handlers, list) {
-            if (ec_eoe_is_open(eoe)) {
-                none_open = 0;
-                break;
-            }
-        }
-        if (none_open)
-            goto schedule;
+        // list_for_each_entry(eoe, &master->eoe_handlers, list) {
+        //     if (ec_eoe_is_open(eoe)) {
+        //         none_open = 0;
+        //         break;
+        //     }
+        // }
+        // if (none_open)
+        //     goto schedule;
 
-        // receive datagrams
-        master->receive_cb(master->cb_data);
+        // // receive datagrams
+        // master->receive_cb(master->cb_data);
 
-        // actual EoE processing
-        sth_to_send = 0;
-        list_for_each_entry(eoe, &master->eoe_handlers, list) {
-            ec_eoe_run(eoe);
-            if (eoe->queue_datagram) {
-                sth_to_send = 1;
-            }
-            if (!ec_eoe_is_idle(eoe)) {
-                all_idle = 0;
-            }
-        }
+        // // actual EoE processing
+        // sth_to_send = 0;
+        // list_for_each_entry(eoe, &master->eoe_handlers, list) {
+        //     ec_eoe_run(eoe);
+        //     if (eoe->queue_datagram) {
+        //         sth_to_send = 1;
+        //     }
+        //     if (!ec_eoe_is_idle(eoe)) {
+        //         all_idle = 0;
+        //     }
+        // }
 
-        if (sth_to_send) {
-            list_for_each_entry(eoe, &master->eoe_handlers, list) {
-                ec_eoe_queue(eoe);
-            }
-            // (try to) send datagrams
-            down(&master->ext_queue_sem);
-            master->send_cb(master->cb_data);
-            up(&master->ext_queue_sem);
-        }
+        // if (sth_to_send) {
+        //     list_for_each_entry(eoe, &master->eoe_handlers, list) {
+        //         ec_eoe_queue(eoe);
+        //     }
+        //     // (try to) send datagrams
+        //     down(&master->ext_queue_sem);
+        //     master->send_cb(master->cb_data);
+        //     up(&master->ext_queue_sem);
+        // }
 
 schedule:
         if (all_idle) {
@@ -1788,6 +1788,51 @@ schedule:
     EC_MASTER_DBG(master, 1, "EoE thread exiting...\n");
     return 0;
 }
+
+int ecrt_master_eoe_process(ec_master_t *master) {
+    ec_eoe_t *eoe;
+    unsigned int sth_to_send;
+
+    // none_open = 1;
+    // all_idle = 1;
+
+    // list_for_each_entry(eoe, &master->eoe_handlers, list) {
+    //     if (ec_eoe_is_open(eoe)) {
+    //         none_open = 0;
+    //         break;
+    //     }
+    // }
+    // if (none_open)
+    //     goto schedule;
+
+    // receive datagrams
+    master->receive_cb(master->cb_data);
+
+    // actual EoE processing
+    sth_to_send = 0;
+    list_for_each_entry(eoe, &master->eoe_handlers, list) {
+        ec_eoe_run(eoe);
+        if (eoe->queue_datagram) {
+            sth_to_send = 1;
+        }
+        // if (!ec_eoe_is_idle(eoe)) {
+        //     all_idle = 0;
+        // }
+    }
+
+    if (sth_to_send) {
+        list_for_each_entry(eoe, &master->eoe_handlers, list) {
+            ec_eoe_queue(eoe);
+        }
+        // (try to) send datagrams
+        down(&master->ext_queue_sem);
+        master->send_cb(master->cb_data);
+        up(&master->ext_queue_sem);
+    }
+
+    return 0;
+}
+
 #endif
 
 /*****************************************************************************/

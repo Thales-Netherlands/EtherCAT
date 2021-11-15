@@ -785,3 +785,16 @@ void ecrt_master_reset(ec_master_t *master)
 }
 
 /****************************************************************************/
+
+int ecrt_master_eoe_process(ec_master_t *master)
+{
+    int ret;
+
+    ret = ioctl(master->fd, EC_IOCTL_EOE_PROCESS, NULL);
+    if (EC_IOCTL_IS_ERROR(ret)) {
+        fprintf(stderr, "Failed to process eoe: %s\n",
+                strerror(EC_IOCTL_ERRNO(ret)));
+    }
+
+    return ret;
+}

@@ -199,6 +199,9 @@ void cyclic_task()
     // send process data
     ecrt_domain_queue(domain1);
     ecrt_master_send(master);
+
+    // trigger eoe processing
+    ecrt_master_eoe_process(master);
 }
 
 /****************************************************************************/

@@ -4106,6 +4106,19 @@ static ATTRIBUTES int ec_ioctl_slave_soe_write(
     return retval;
 }
 
+/** External processing of eoe
+ *
+ * \return Zero on success, otherwise a negative error code.
+ */
+static ATTRIBUTES int ec_ioctl_master_eoe_process(
+        ec_master_t *master /**< EtherCAT master. */
+        )
+{
+    int ret = ecrt_master_eoe_process(master);
+    return ret;
+}
+
+
 /*****************************************************************************/
 
 /** ioctl() function to use.
@@ -4625,6 +4638,9 @@ long EC_IOCTL(
                 break;
             }
             ret = ec_ioctl_set_send_interval(master, arg, ctx);
+            break;
+        case EC_IOCTL_EOE_PROCESS:
+            ret = ec_ioctl_master_eoe_process(master);
             break;
         default:
             ret = -ENOTTY;

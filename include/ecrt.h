@@ -979,6 +979,12 @@ void ecrt_master_receive(
         ec_master_t *master /**< EtherCAT master. */
         );
 
+
+/**
+ * external processing of eoe for userspace master access
+ */
+int ecrt_master_eoe_process(ec_master_t *master);
+
 /** Sends non-application datagrams.
  *
  * This method has to be called in the send callback function passed via
