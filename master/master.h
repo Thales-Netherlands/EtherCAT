@@ -288,7 +288,6 @@ struct ec_master {
     struct task_struct *thread; /**< Master thread. */
 
 #ifdef EC_EOE
-    struct task_struct *eoe_thread; /**< EoE thread. */
     struct list_head eoe_handlers; /**< Ethernet over EtherCAT handlers. */
 #endif
 

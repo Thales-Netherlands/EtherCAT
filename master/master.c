@@ -106,9 +106,6 @@ void ec_master_clear_slave_configs(ec_master_t *);
 void ec_master_clear_domains(ec_master_t *);
 static int ec_master_idle_thread(void *);
 static int ec_master_operation_thread(void *);
-#ifdef EC_EOE
-static int ec_master_eoe_thread(void *);
-#endif
 void ec_master_find_dc_ref_clock(ec_master_t *);
 void ec_master_clear_device_stats(ec_master_t *);
 void ec_master_update_device_stats(ec_master_t *);
@@ -230,7 +227,6 @@ int ec_master_init(ec_master_t *master, /**< EtherCAT master */
     master->thread = NULL;
 
 #ifdef EC_EOE
-    master->eoe_thread = NULL;
     INIT_LIST_HEAD(&master->eoe_handlers);
 #endif
 
@@ -668,9 +664,6 @@ void ec_master_leave_idle_phase(ec_master_t *master /**< EtherCAT master */)
 
     master->phase = EC_ORPHANED;
 
-#ifdef EC_EOE
-    ec_master_eoe_stop(master);
-#endif
     ec_master_thread_stop(master);
 
     down(&master->master_sem);
@@ -1679,131 +1672,10 @@ static int ec_master_operation_thread(void *priv_data)
 /*****************************************************************************/
 
 #ifdef EC_EOE
-/** Starts Ethernet over EtherCAT processing on demand.
- */
-void ec_master_eoe_start(ec_master_t *master /**< EtherCAT master */)
-{
-    if (master->eoe_thread) {
-        EC_MASTER_WARN(master, "EoE already running!\n");
-        return;
-    }
-
-    if (list_empty(&master->eoe_handlers))
-        return;
-
-    if (!master->send_cb || !master->receive_cb) {
-        EC_MASTER_WARN(master, "No EoE processing"
-                " because of missing callbacks!\n");
-        return;
-    }
-
-    EC_MASTER_INFO(master, "Starting EoE thread.\n");
-    master->eoe_thread = kthread_run(ec_master_eoe_thread, master,
-            "EtherCAT-EoE");
-    if (IS_ERR(master->eoe_thread)) {
-        int err = (int) PTR_ERR(master->eoe_thread);
-        EC_MASTER_ERR(master, "Failed to start EoE thread (error %i)!\n",
-                err);
-        master->eoe_thread = NULL;
-        return;
-    }
-
-    set_normal_priority(master->eoe_thread, 0);
-}
-
-/*****************************************************************************/
-
-/** Stops the Ethernet over EtherCAT processing.
- */
-void ec_master_eoe_stop(ec_master_t *master /**< EtherCAT master */)
-{
-    if (master->eoe_thread) {
-        EC_MASTER_INFO(master, "Stopping EoE thread.\n");
-
-        kthread_stop(master->eoe_thread);
-        master->eoe_thread = NULL;
-        EC_MASTER_INFO(master, "EoE thread exited.\n");
-    }
-}
-
-/*****************************************************************************/
-
-/** Does the Ethernet over EtherCAT processing.
- */
-static int ec_master_eoe_thread(void *priv_data)
-{
-    ec_master_t *master = (ec_master_t *) priv_data;
-    ec_eoe_t *eoe;
-    unsigned int none_open, sth_to_send, all_idle;
-
-    EC_MASTER_DBG(master, 1, "EoE thread running.\n");
-
-    while (!kthread_should_stop()) {
-        none_open = 1;
-        all_idle = 1;
-
-        // list_for_each_entry(eoe, &master->eoe_handlers, list) {
-        //     if (ec_eoe_is_open(eoe)) {
-        //         none_open = 0;
-        //         break;
-        //     }
-        // }
-        // if (none_open)
-        //     goto schedule;
-
-        // // receive datagrams
-        // master->receive_cb(master->cb_data);
-
-        // // actual EoE processing
-        // sth_to_send = 0;
-        // list_for_each_entry(eoe, &master->eoe_handlers, list) {
-        //     ec_eoe_run(eoe);
-        //     if (eoe->queue_datagram) {
-        //         sth_to_send = 1;
-        //     }
-        //     if (!ec_eoe_is_idle(eoe)) {
-        //         all_idle = 0;
-        //     }
-        // }
-
-        // if (sth_to_send) {
-        //     list_for_each_entry(eoe, &master->eoe_handlers, list) {
-        //         ec_eoe_queue(eoe);
-        //     }
-        //     // (try to) send datagrams
-        //     down(&master->ext_queue_sem);
-        //     master->send_cb(master->cb_data);
-        //     up(&master->ext_queue_sem);
-        // }
-
-schedule:
-        if (all_idle) {
-            set_current_state(TASK_INTERRUPTIBLE);
-            schedule_timeout(1);
-        } else {
-            schedule();
-        }
-    }
-
-    EC_MASTER_DBG(master, 1, "EoE thread exiting...\n");
-    return 0;
-}
 
 int ecrt_master_eoe_process(ec_master_t *master) {
     ec_eoe_t *eoe;
     unsigned int sth_to_send;
-
-    // none_open = 1;
-    // all_idle = 1;
-
-    // list_for_each_entry(eoe, &master->eoe_handlers, list) {
-    //     if (ec_eoe_is_open(eoe)) {
-    //         none_open = 0;
-    //         break;
-    //     }
-    // }
-    // if (none_open)
-    //     goto schedule;
 
     // receive datagrams
     master->receive_cb(master->cb_data);
@@ -1815,9 +1687,6 @@ int ecrt_master_eoe_process(ec_master_t *master) {
         if (eoe->queue_datagram) {
             sth_to_send = 1;
         }
-        // if (!ec_eoe_is_idle(eoe)) {
-        //     all_idle = 0;
-        // }
     }
 
     if (sth_to_send) {
@@ -2357,9 +2226,6 @@ int ecrt_master_activate(ec_master_t *master)
     uint32_t domain_offset;
     ec_domain_t *domain;
     int ret;
-#ifdef EC_EOE
-    int eoe_was_running;
-#endif
 
     EC_MASTER_DBG(master, 1, "ecrt_master_activate(master = 0x%p)\n", master);
 
@@ -2387,10 +2253,6 @@ int ecrt_master_activate(ec_master_t *master)
     // restart EoE process and master thread with new locking
 
     ec_master_thread_stop(master);
-#ifdef EC_EOE
-    eoe_was_running = master->eoe_thread != NULL;
-    ec_master_eoe_stop(master);
-#endif
 
     EC_MASTER_DBG(master, 1, "FSM datagram is %p.\n", &master->fsm_datagram);
 
@@ -2401,11 +2263,6 @@ int ecrt_master_activate(ec_master_t *master)
     master->receive_cb = master->app_receive_cb;
     master->cb_data = master->app_cb_data;
 
-#ifdef EC_EOE
-    if (eoe_was_running) {
-        ec_master_eoe_start(master);
-    }
-#endif
     ret = ec_master_thread_start(master, ec_master_operation_thread,
                 "EtherCAT-OP");
     if (ret < 0) {
@@ -2431,7 +2288,6 @@ void ecrt_master_deactivate(ec_master_t *master)
     ec_slave_t *slave;
 #ifdef EC_EOE
     ec_eoe_t *eoe;
-    int eoe_was_running;
 #endif
 
     EC_MASTER_DBG(master, 1, "%s(master = 0x%p)\n", __func__, master);
@@ -2442,10 +2298,6 @@ void ecrt_master_deactivate(ec_master_t *master)
     }
 
     ec_master_thread_stop(master);
-#ifdef EC_EOE
-    eoe_was_running = master->eoe_thread != NULL;
-    ec_master_eoe_stop(master);
-#endif
 
     master->send_cb = ec_master_internal_send_cb;
     master->receive_cb = ec_master_internal_receive_cb;
@@ -2477,11 +2329,6 @@ void ecrt_master_deactivate(ec_master_t *master)
     master->app_time = 0ULL;
     master->dc_ref_time = 0ULL;
 
-#ifdef EC_EOE
-    if (eoe_was_running) {
-        ec_master_eoe_start(master);
-    }
-#endif
     if (ec_master_thread_start(master, ec_master_idle_thread,
                 "EtherCAT-IDLE")) {
         EC_MASTER_WARN(master, "Failed to restart master thread!\n");
