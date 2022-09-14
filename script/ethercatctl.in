@@ -70,6 +70,8 @@ parse_mac_address() {
 case "${1}" in
 
 start)
+    /sbin/depmod -a
+
     # construct DEVICES and BACKUPS from configuration variables
     DEVICES=""
     BACKUPS=""
