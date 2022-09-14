@@ -9,8 +9,8 @@ Description=EtherCAT Master Kernel Modules
 # Uncomment this, if the generic Ethernet driver is used. It assures, that the
 # network interfaces are configured, before the master starts.
 #
-#Requires=network.service # Stop master, if network is stopped
-#After=network.service # Start master, after network is ready
+Requires=network.service # Stop master, if network is stopped
+After=network.service # Start master, after network is ready
 
 #
 # Uncomment this, if a native Ethernet driver is used. It assures, that the
