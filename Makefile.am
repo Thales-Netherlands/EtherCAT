@@ -57,6 +57,7 @@ endif
 
 if ENABLE_TTY
 SUBDIRS += tty
+SUBDIRS += libtty
 endif
 
 

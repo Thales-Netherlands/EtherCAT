@@ -126,6 +126,13 @@ lib/Makefile.in
 lib/TAGS
 lib/libethercat.la
 lib/libethercat_rtdm.la
+libtty/.deps
+libtty/.libs
+libtty/Makefile
+libtty/Makefile.in
+libtty/TAGS
+libtty/libethercattty.la
+libtty/libethercattty_rtdm.la
 libtool
 m4/Makefile
 m4/Makefile.in

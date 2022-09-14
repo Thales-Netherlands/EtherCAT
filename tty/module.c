@@ -45,27 +45,27 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 
+#include "tty.h"
+#include "cdev.h"
 #include "../master/globals.h"
 #include "../include/ectty.h"
-
-/*****************************************************************************/
-
-#define PFX "ec_tty: "
-
-#define EC_TTY_MAX_DEVICES 32
-#define EC_TTY_TX_BUFFER_SIZE 100
-#define EC_TTY_RX_BUFFER_SIZE 100
-
-#define EC_TTY_DEBUG 0
 
 /*****************************************************************************/
 
 char *ec_master_version_str = EC_MASTER_VERSION; /**< Version string. */
 unsigned int debug_level = 0;
 
+unsigned int ioctl_debug_filter = 8; /**< Filter IOCTL message by setting bit corresponding to IOCLT command nr */
+static int cflag_change_callback_enabled = 0;
+
 static struct tty_driver *tty_driver = NULL;
 ec_tty_t *ttys[EC_TTY_MAX_DEVICES];
 struct semaphore tty_sem;
+
+dev_t device_number;
+struct class *class;
+struct cdev cdev;
+struct device *class_device;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
 void ec_tty_wakeup(struct timer_list *);
@@ -84,6 +84,8 @@ MODULE_VERSION(EC_MASTER_VERSION);
 
 module_param_named(debug_level, debug_level, uint, S_IRUGO);
 MODULE_PARM_DESC(debug_level, "Debug level");
+module_param_named(ioctl_debug_filter, ioctl_debug_filter, uint, S_IRUGO);
+MODULE_PARM_DESC(ioctl_debug_filter, "IOCTL debug filter");
 
 /** \endcond */
 
@@ -97,28 +99,6 @@ static struct ktermios ec_tty_std_termios = {
     .c_cflag = B9600 | CS8 | CREAD,
     .c_lflag = 0,
     .c_cc = INIT_C_CC,
-};
-
-struct ec_tty {
-    int minor;
-    struct device *dev;
-
-    uint8_t tx_buffer[EC_TTY_TX_BUFFER_SIZE];
-    unsigned int tx_read_idx;
-    unsigned int tx_write_idx;
-    unsigned int wakeup;
-
-    uint8_t rx_buffer[EC_TTY_RX_BUFFER_SIZE];
-    unsigned int rx_read_idx;
-    unsigned int rx_write_idx;
-
-    struct timer_list timer;
-    struct tty_struct *tty;
-    unsigned int open_count;
-    struct semaphore sem;
-
-    ec_tty_operations_t ops;
-    void *cb_data;
 };
 
 static const struct tty_operations ec_tty_ops; // see below
@@ -137,6 +117,47 @@ int __init ec_tty_init_module(void)
 
     sema_init(&tty_sem, 1);
 
+	if (alloc_chrdev_region(&device_number, 0, 1, DEVICE_NAME) != 0) {
+		printk(KERN_ERR PFX "Failed to obtain device number(s)!\n");
+		ret = -EBUSY;
+		goto out_return;
+	}
+
+	class = class_create(THIS_MODULE, DEVICE_NAME);
+	if (IS_ERR(class)) {
+		printk(KERN_ERR PFX "Failed to create device class.\n");
+		ret = PTR_ERR(class);
+		goto out_cdev;
+	}
+
+	// init character device
+	ret = ec_cdev_init(&cdev, device_number);
+	if (ret != 0)
+		goto out_class;
+
+	#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
+	class_device = device_create(class, NULL,
+			MKDEV(MAJOR(device_number), 0), NULL,
+			DEVICE_NAME);
+	#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 26)
+	class_device = device_create(class, NULL,
+			MKDEV(MAJOR(device_number), 0),
+			DEVICE_NAME);
+	#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 15)
+	class_device = class_device_create(class, NULL,
+			MKDEV(MAJOR(device_number), 0), NULL,
+			DEVICE_NAME);
+	#else
+	class_device = class_device_create(class,
+		MKDEV(MAJOR(device_number), 0), NULL,
+			DEVICE_NAME);
+	#endif
+	if (IS_ERR(class_device) || class_device == NULL) {
+		printk(KERN_ERR PFX "Failed to create class device!\n");
+		ret = PTR_ERR(class_device);
+		goto out_del_cdev;
+	}
+
     for (i = 0; i < EC_TTY_MAX_DEVICES; i++) {
         ttys[i] = NULL;
     }
@@ -145,7 +166,7 @@ int __init ec_tty_init_module(void)
     if (!tty_driver) {
         printk(KERN_ERR PFX "Failed to allocate tty driver.\n");
         ret = -ENOMEM;
-        goto out_return;
+        goto out_tty;
     }
 
     tty_driver->owner = THIS_MODULE;
@@ -167,17 +188,29 @@ int __init ec_tty_init_module(void)
 
     return ret;
 
-out_put:
-    put_tty_driver(tty_driver);
-out_return:
-    return ret;
+    out_put:
+        put_tty_driver(tty_driver);
+    out_tty:
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 26)
+		device_unregister(class_device);
+#else
+		class_device_unregister(class_device);
+#endif
+    out_del_cdev:
+    	cdev_del(&cdev);
+    out_class:
+    	class_destroy(class);
+    out_cdev:
+    	unregister_chrdev_region(device_number, 1);
+    out_return:
+    	return ret;
 }
 
 /*****************************************************************************/
 
 /** Module cleanup.
  *
- * Clears all master instances.
+ * Clears all tty instances.
  */
 void __exit ec_tty_cleanup_module(void)
 {
@@ -195,6 +228,16 @@ void __exit ec_tty_cleanup_module(void)
 
     tty_unregister_driver(tty_driver);
     put_tty_driver(tty_driver);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 26)
+	device_unregister(class_device);
+#else
+	class_device_unregister(class_device);
+#endif
+	cdev_del(&cdev);
+	class_destroy(class);
+	unregister_chrdev_region(device_number, 1);
+
     printk(KERN_INFO PFX "Module unloading.\n");
 }
 
@@ -226,8 +269,22 @@ int ec_tty_init(ec_tty_t *t, int minor,
     t->tty = NULL;
     t->open_count = 0;
     sema_init(&t->sem, 1);
-    t->ops = *ops;
-    t->cb_data = cb_data;
+
+    if (ops != NULL && cb_data != NULL ) {
+    	cflag_change_callback_enabled = 1;
+		t->ops = *ops;
+		t->cb_data = cb_data;
+    } else {
+    	cflag_change_callback_enabled = 0;
+		t->ops.cflag_changed = NULL;
+		t->cb_data = NULL;
+    	printk(KERN_WARNING PFX "Cflag change operations not set! running without Cflag callback support");
+	}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0))
+    tty_port_init(&t->port);
+    tty_port_link_device(&t->port, tty_driver, t->minor);
+#endif
 
     t->dev = tty_register_device(tty_driver, t->minor, NULL);
     if (IS_ERR(t->dev)) {
@@ -251,22 +308,30 @@ int ec_tty_init(ec_tty_t *t, int minor,
     } else {
         cflag = tty_driver->init_termios.c_cflag;
     }
-    ret = t->ops.cflag_changed(t->cb_data, cflag);
+
+
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0)
     tty_driver->ports[minor] = kmalloc(sizeof(**tty_driver->ports),
             GFP_KERNEL);
     if (!tty_driver->ports[minor]) {
         ret = -ENOMEM;
+	    printk(KERN_ERR PFX "ERROR: Malloc failed for tty driver ports.\n",
+	            cflag);
+	    tty_unregister_device(tty_driver, t->minor);
+	    return ret;
     }
 #endif
 
-    if (ret) {
-        printk(KERN_ERR PFX "ERROR: Initial cflag 0x%x not accepted.\n",
-                cflag);
-        tty_unregister_device(tty_driver, t->minor);
-        return ret;
-    }
+	if (cflag_change_callback_enabled) {
+    	ret = t->ops.cflag_changed(t->cb_data, cflag);
+		if (ret) {
+		    printk(KERN_ERR PFX "ERROR: Initial cflag 0x%x not accepted.\n",
+		            cflag);
+		    tty_unregister_device(tty_driver, t->minor);
+		    return ret;
+		}
+	}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0)
     tty_port_init(tty_driver->ports[minor]);
@@ -661,12 +726,14 @@ static void ec_tty_set_termios(struct tty_struct *tty,
             old_termios->c_cflag, termios->c_cflag);
 #endif
 
-    ret = t->ops.cflag_changed(t->cb_data, termios->c_cflag);
-    if (ret) {
-        printk(KERN_ERR PFX "ERROR: cflag 0x%x not accepted.\n",
-                termios->c_cflag);
-        termios->c_cflag = old_termios->c_cflag;
-    }
+	if (cflag_change_callback_enabled) {
+		ret = t->ops.cflag_changed(t->cb_data, termios->c_cflag);
+		if (ret) {
+		    printk(KERN_ERR PFX "ERROR: cflag 0x%x not accepted.\n",
+		            termios->c_cflag);
+		    termios->c_cflag = old_termios->c_cflag;
+		}
+	}
 }
 
 /*****************************************************************************/
@@ -813,6 +880,33 @@ void ectty_free(ec_tty_t *tty)
 }
 
 /*****************************************************************************/
+
+ec_tty_t *ectty_get_by_minor(int minor)
+{
+	if (ttys[minor] != NULL) {
+		return ttys[minor];
+	}
+	else
+	{
+	    printk(KERN_ERR PFX "Minor %d not available! \n", minor);
+	    return NULL;
+	}
+}
+
+/*****************************************************************************/
+
+void ectty_free_all(void)
+{
+	int i;
+    for (i = 0; i < EC_TTY_MAX_DEVICES; i++) {
+        if (ttys[i] != NULL) {
+        	ectty_free(ttys[i]);
+        }
+    }
+}
+
+/*****************************************************************************/
+
 
 unsigned int ectty_tx_data(ec_tty_t *tty, uint8_t *buffer, size_t size)
 {

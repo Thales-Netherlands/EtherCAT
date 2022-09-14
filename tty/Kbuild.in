@@ -34,7 +34,9 @@
 obj-m := ec_tty.o
 
 ec_tty-objs := \
-	module.o
+	module.o \
+	ioctl.o \
+	cdev.o
 
 REV := $(shell if test -s $(src)/../revision; then \
 		cat $(src)/../revision; \

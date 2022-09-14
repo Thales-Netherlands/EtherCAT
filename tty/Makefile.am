@@ -30,7 +30,9 @@ include $(top_srcdir)/Makefile.kbuild
 
 # using HEADERS to enable tags target
 noinst_HEADERS = \
-	module.c
+	module.c \
+    ioctl.c ioctl.h \
+    cdev.c cdev.h 
 
 EXTRA_DIST = \
 	README

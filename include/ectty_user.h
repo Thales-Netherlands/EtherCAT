@@ -30,7 +30,7 @@
 
 /** \file
  *
- * EtherCAT virtual TTY interface.
+ * EtherCAT virtual TTY userspace interface.
  *
  * \defgroup TTYInterface EtherCAT Virtual TTY Interface
  *
@@ -39,33 +39,15 @@
 
 /*****************************************************************************/
 
-#ifndef __ECTTY_H__
-#define __ECTTY_H__
-
-#ifdef __KERNEL__
-#include <linux/termios.h>
-#else
-#include <stdint.h> // this is needed for user space
-#include <stdlib.h> // for size_t
-#include <termios.h>
-#endif
+#ifndef __ECTTY_USER_H__
+#define __ECTTY_USER_H__
 
 /******************************************************************************
  * Data types
  *****************************************************************************/
 
-struct ec_tty;
-typedef struct ec_tty ec_tty_t; /**< \see ec_tty */
-
-/** Operations on the virtual TTY interface.
- */
-typedef struct {
-    int (*cflag_changed)(void *, tcflag_t); /**< Called when the serial
-                                              * settings shall be changed. The
-                                              * \a cflag argument contains the
-                                              * new settings. */
-} ec_tty_operations_t;
-
+struct tty_char_dev;
+typedef struct tty_char_dev tty_char_dev_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -75,48 +57,18 @@ extern "C" {
  * Global functions
  *****************************************************************************/
 
-/** Create a virtual TTY interface.
- *
- * \param ops Set of callbacks.
- * \param cb_data Arbitrary data, that is passed to any callback.
- *
- * \return Pointer to the interface object, otherwise an ERR_PTR value.
+/** Opens character device to allow communication between kernel and user space
+ * \return -1 on error and 0 on succes
  */
-ec_tty_t *ectty_create(
-        const ec_tty_operations_t *ops,
-        void *cb_data
-        );
+int open_ectty_cdev(void);
+
+/** Closes character device
+ */
+void close_ectty_cdev(void);
 
 /******************************************************************************
  * TTY interface methods
  *****************************************************************************/
-
-/** Releases a virtual TTY interface.
- */
-void ectty_free(
-        ec_tty_t *tty /**< TTY interface. */
-        );
-
-/** Reads data to send from the TTY interface.
- *
- * If there are data to send, they are copied into the \a buffer. At maximum,
- * \a size bytes are copied. The actual number of bytes copied is returned.
- *
- * \return Number of bytes copied.
- */
-unsigned int ectty_tx_data(
-        ec_tty_t *tty, /**< TTY interface. */
-        uint8_t *buffer, /**< Buffer for data to transmit. */
-        size_t size /**< Available space in \a buffer. */
-        );
-
-/** Pushes received data to the TTY interface.
- */
-void ectty_rx_data(
-        ec_tty_t *tty, /**< TTY interface. */
-        const uint8_t *buffer, /**< Buffer with received data. */
-        size_t size /**< Number of bytes in \a buffer. */
-        );
 
 /*****************************************************************************/
 

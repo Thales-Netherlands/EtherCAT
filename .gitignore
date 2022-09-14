@@ -35,6 +35,13 @@ examples/user/ec_user_example
 lib/EtherCATConfig.cmake
 lib/libethercat.la
 lib/libethercat.pc
+libtty/.deps
+libtty/.libs
+libtty/Makefile
+libtty/Makefile.in
+libtty/TAGS
+libtty/libethercattty.la
+libtty/libethercattty_rtdm.la
 libtool
 master/*.o.d
 script/ethercat.service
